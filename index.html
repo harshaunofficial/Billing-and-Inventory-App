@@ -137,13 +137,32 @@
         
         setLogLevel('debug');
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // IMPORTANT: Replace the placeholder values below with your actual Firebase project config.
+        // You can find this in your Firebase console under Project Settings > Your apps.
+        // If you see the error "auth/api-key-not-valid", it means you haven't done this step.
+        const firebaseConfig = {
+  	apiKey: "AIzaSyCRovfi5iWQclsk8Hgp6C7S_-2ZBt5IpQg",
+  	authDomain: "billing-inventory-c801a.firebaseapp.com",
+  	projectId: "billing-inventory-c801a",
+  	storageBucket: "billing-inventory-c801a.firebasestorage.app",
+  	messagingSenderId: "1052617148998",
+  	appId: "1:1052617148998:web:7b82a96431714f40851847"
+};
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
+        
+        const appId = firebaseConfig.projectId;
+
+        let app;
+        let db;
+        let auth;
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+        } catch (error) {
+            console.error("Firebase Initialization Failed:", error);
+            document.getElementById('userIdDisplay').textContent = "Initialization Failed. Please check your Firebase config.";
+        }
 
         let userId = null;
         let authReady = false;
@@ -212,7 +231,7 @@
         }
         
         // --- Firebase Authentication and Data Listeners ---
-        onAuthStateChanged(auth, async (user) => {
+        onAuthStateChanged(auth, (user) => {
             if (user) {
                 userId = user.uid;
                 authReady = true;
@@ -220,14 +239,10 @@
                 initializeAppAndRender();
             } else {
                 try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
+                    signInAnonymously(auth);
                 } catch (error) {
-                    console.error("Firebase auth with custom token failed, signing in anonymously:", error);
-                    await signInAnonymously(auth);
+                    console.error("Anonymous sign-in failed:", error);
+                    document.getElementById('userIdDisplay').textContent = "Authentication failed. Please check your Firebase project configuration.";
                 }
             }
         });
@@ -1155,3 +1170,4 @@
     </script>
 </body>
 </html>
+
