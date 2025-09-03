@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Billing and Inventory App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            @apply bg-gray-100 text-gray-800;
+        }
+        .container {
+            @apply max-w-7xl mx-auto p-4 md:p-8;
+        }
+        .card {
+            @apply bg-white p-6 md:p-8 rounded-xl shadow-lg border border-gray-200;
+        }
+        .btn {
+            @apply font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+        }
+        .btn-primary {
+            @apply bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50;
+        }
+        .btn-secondary {
+            @apply bg-gray-200 text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50;
+        }
+        .btn-danger {
+            @apply bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50;
+        }
+        .input-field {
+            @apply w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors duration-200;
+        }
+        .table-striped tbody tr:nth-child(odd) {
+            background-color: #f9fafb;
+        }
+        .modal {
+            @apply fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50;
+        }
+        .modal-content {
+            @apply bg-white p-6 md:p-8 rounded-xl shadow-2xl max-w-sm w-full;
+        }
+        .bill-preview-modal-content {
+            @apply bg-white p-6 md:p-8 rounded-xl shadow-2xl max-w-3xl w-full;
+        }
+        .bill-preview-container {
+            font-family: 'Inter', sans-serif;
+        }
+        /* PDF specific styles */
+        .pdf-container {
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            color: #1f2937;
+            padding: 20px;
+        }
+        .pdf-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .pdf-table th, .pdf-table td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            text-align: left;
+        }
+        .pdf-total-row td {
+            font-weight: bold;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container flex flex-col min-h-screen">
+        <!-- Header & Nav -->
+        <header class="flex flex-col md:flex-row justify-between items-center mb-6 md:mb-8 p-4 bg-white rounded-xl shadow-sm border border-gray-200">
+            <h1 class="text-3xl font-bold text-gray-900 mb-4 md:mb-0">Billing & Inventory</h1>
+            <nav class="space-x-2 flex">
+                <button id="nav-home" class="btn btn-secondary">Home</button>
+                <button id="nav-skus" class="btn btn-secondary">Products</button>
+                <button id="nav-customers" class="btn btn-secondary">Customers</button>
+                <button id="nav-bills" class="btn btn-secondary">Generate Bill</button>
+                <button id="nav-past-bills" class="btn btn-primary">Past Bills</button>
+            </nav>
+        </header>
+
+        <!-- Main content area -->
+        <main id="app-content" class="flex-grow">
+            <!-- Content will be injected here -->
+        </main>
+
+        <!-- User ID and Loading Indicator -->
+        <div class="mt-6 text-center text-sm text-gray-500 flex flex-col md:flex-row justify-between items-center">
+            <div id="userIdDisplay">Authenticating...</div>
+        </div>
+
+    </div>
+
+    <!-- Custom Modal for Confirmation/Messages -->
+    <div id="custom-modal" class="modal hidden">
+        <div class="modal-content">
+            <p id="modal-message" class="text-center text-lg font-medium mb-6"></p>
+            <div class="flex justify-center space-x-4">
+                <button id="modal-confirm" class="btn btn-danger hidden">Confirm</button>
+                <button id="modal-cancel" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bill Preview Modal -->
+    <div id="bill-preview-modal" class="modal hidden">
+        <div class="bill-preview-modal-content">
+            <h2 class="text-2xl font-bold text-center mb-4">Bill Preview</h2>
+            <div id="bill-preview-content" class="bill-preview-container overflow-auto max-h-[70vh] p-4 bg-gray-50 rounded-lg"></div>
+            <div class="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 mt-6">
+                <button id="download-bill-btn" class="btn btn-primary">Download Bill</button>
+                <button id="close-preview-btn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Temporary container for PDF generation -->
+    <div id="pdf-container" class="hidden"></div>
+    
+    <!-- PDF Generation Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        setLogLevel('debug');
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let userId = null;
+        let authReady = false;
+        let domReady = false;
+
+        const appState = {
+            currentView: 'pastBills',
+            skus: [],
+            customers: [],
+            bills: [],
+            billItems: [],
+            selectedCustomer: null,
+            selectedDate: new Date(),
+            sellerDetails: null,
+            billToSave: null
+        };
+
+        const appContent = document.getElementById('app-content');
+        const modal = document.getElementById('custom-modal');
+        const modalMessage = document.getElementById('modal-message');
+        const modalConfirmBtn = document.getElementById('modal-confirm');
+        const modalCancelBtn = document.getElementById('modal-cancel');
+
+        const billPreviewModal = document.getElementById('bill-preview-modal');
+        const billPreviewContent = document.getElementById('bill-preview-content');
+        const downloadBillBtn = document.getElementById('download-bill-btn');
+        const closePreviewBtn = document.getElementById('close-preview-btn');
+        const pdfContainer = document.getElementById('pdf-container');
+        
+        // --- Core Initialization and Rendering Logic ---
+        function renderApp() {
+            if (!authReady || !domReady) {
+                appContent.innerHTML = `<div class="text-center card">Loading... Please wait.</div>`;
+                return;
+            }
+
+            const navBtn = document.getElementById(`nav-${appState.currentView.toLowerCase()}`);
+            if (navBtn) {
+                document.querySelectorAll('nav .btn').forEach(btn => btn.classList.replace('btn-primary', 'btn-secondary'));
+                navBtn.classList.replace('btn-secondary', 'btn-primary');
+            }
+
+            switch (appState.currentView) {
+                case 'skus':
+                    renderSKUsView();
+                    break;
+                case 'customers':
+                    renderCustomersView();
+                    break;
+                case 'bills':
+                    renderBillsView();
+                    break;
+                case 'pastBills':
+                    renderPastBillsView();
+                    break;
+                default:
+                    renderHomeView();
+            }
+        }
+        
+        function initializeAppAndRender() {
+            if (authReady && domReady) {
+                startListeners();
+                renderApp();
+            }
+        }
+        
+        // --- Firebase Authentication and Data Listeners ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                authReady = true;
+                document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
+                initializeAppAndRender();
+            } else {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Firebase auth with custom token failed, signing in anonymously:", error);
+                    await signInAnonymously(auth);
+                }
+            }
+        });
+
+        function startListeners() {
+            if (!authReady) return;
+
+            const userPath = `artifacts/${appId}/users/${userId}`;
+
+            const skusCol = collection(db, `${userPath}/skus`);
+            onSnapshot(skusCol, (snapshot) => {
+                appState.skus = snapshot.docs.map(doc => ({ hsn: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Error listening to SKUs:", error));
+
+            const customersCol = collection(db, `${userPath}/customers`);
+            onSnapshot(customersCol, (snapshot) => {
+                appState.customers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Error listening to Customers:", error));
+
+            const billsCol = collection(db, `${userPath}/bills`);
+            onSnapshot(billsCol, (snapshot) => {
+                appState.bills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Error listening to Bills:", error));
+
+            const sellerDetailsDoc = doc(db, `${userPath}/seller/details`);
+            onSnapshot(sellerDetailsDoc, (snapshot) => {
+                if (snapshot.exists()) {
+                    appState.sellerDetails = snapshot.data();
+                } else {
+                    appState.sellerDetails = {
+                        name: "TEJASWINI MARKETING",
+                        address: "D.NO : 19-1-18,\nVisakhapatnam -530001",
+                        gstin: "37BTBPM5644R1ZY",
+                        state: "Andhra Pradesh, Code : 37"
+                    };
+                }
+                renderApp();
+            }, (error) => console.error("Error listening to seller details:", error));
+        }
+
+        // --- UI Rendering and Event Handlers ---
+        document.getElementById('nav-home').addEventListener('click', () => {
+            appState.currentView = 'home';
+            renderApp();
+        });
+        document.getElementById('nav-skus').addEventListener('click', () => {
+            appState.currentView = 'skus';
+            renderApp();
+        });
+        document.getElementById('nav-customers').addEventListener('click', () => {
+            appState.currentView = 'customers';
+            renderApp();
+        });
+        document.getElementById('nav-bills').addEventListener('click', () => {
+            appState.currentView = 'bills';
+            appState.billItems = [];
+            appState.selectedCustomer = null;
+            appState.selectedDate = new Date();
+            renderApp();
+        });
+        document.getElementById('nav-past-bills').addEventListener('click', () => {
+            appState.currentView = 'pastBills';
+            renderApp();
+        });
+
+        modalCancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+
+        closePreviewBtn.addEventListener('click', () => {
+            billPreviewModal.classList.add('hidden');
+            appState.billToSave = null;
+        });
+
+        downloadBillBtn.addEventListener('click', async () => {
+            if (!appState.billToSave) {
+                showModal("No bill data to save.");
+                return;
+            }
+            
+            try {
+                const invoiceNumber = Math.floor(Math.random() * 90000000) + 10000000;
+                const billToSave = {
+                    ...appState.billToSave,
+                    invoiceNo: invoiceNumber
+                };
+
+                // Save to DB first
+                await saveBillToDb(billToSave);
+                
+                showModal("Bill generated and saved successfully!");
+                
+                // Then, generate and download the PDF using the data that was saved to the database.
+                generateAndDownloadPdf(billToSave);
+                
+                // Clear state and UI after PDF generation is triggered
+                appState.billItems = [];
+                appState.selectedCustomer = null;
+                appState.billToSave = null;
+                
+                renderBillsView();
+                
+                billPreviewModal.classList.add('hidden');
+                
+            } catch (error) {
+                showModal("Error generating bill. Check console for details.");
+                console.error("Error generating bill:", error);
+            }
+        });
+
+        async function saveBillToDb(billData) {
+            const userPath = `artifacts/${appId}/users/${userId}`;
+            const newBillRef = await addDoc(collection(db, `${userPath}/bills`), billData);
+            return { ...billData, id: newBillRef.id };
+        }
+
+        function showModal(message, onConfirm = null) {
+            modalMessage.textContent = message;
+            if (onConfirm) {
+                modalConfirmBtn.classList.remove('hidden');
+                modalConfirmBtn.onclick = () => {
+                    onConfirm();
+                    modal.classList.add('hidden');
+                };
+            } else {
+                modalConfirmBtn.classList.add('hidden');
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function renderHomeView() {
+            const sellerDetails = appState.sellerDetails || {};
+            appContent.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="card space-y-4">
+                        <h2 class="text-2xl font-semibold text-gray-900">Welcome!</h2>
+                        <p class="text-gray-600">This is a simple billing and inventory management application. Use the navigation bar above to manage your products, customers, and to generate new bills.</p>
+                        <p class="text-gray-600">All data is saved in your private Firestore collection.</p>
+                    </div>
+                    <div class="card">
+                        <h2 class="text-2xl font-semibold mb-4">Seller Details</h2>
+                        <form id="seller-details-form" class="space-y-4">
+                            <div>
+                                <label for="seller-name" class="block text-sm font-medium text-gray-700">Seller Name</label>
+                                <input type="text" id="seller-name" value="${sellerDetails.name || ''}" class="input-field" required>
+                            </div>
+                            <div>
+                                <label for="seller-address" class="block text-sm font-medium text-gray-700">Address</label>
+                                <textarea id="seller-address" rows="3" class="input-field" required>${sellerDetails.address || ''}</textarea>
+                            </div>
+                            <div>
+                                <label for="seller-gstin" class="block text-sm font-medium text-gray-700">GSTIN/UIN</label>
+                                <input type="text" id="seller-gstin" value="${sellerDetails.gstin || ''}" class="input-field" required>
+                            </div>
+                            <div>
+                                <label for="seller-state" class="block text-sm font-medium text-gray-700">State</label>
+                                <input type="text" id="seller-state" value="${sellerDetails.state || ''}" class="input-field" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-full">Save Details</button>
+                        </form>
+                    </div>
+                </div>
+            `;
+            const sellerForm = document.getElementById('seller-details-form');
+            if (sellerForm) {
+                sellerForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const newDetails = {
+                        name: document.getElementById('seller-name').value,
+                        address: document.getElementById('seller-address').value,
+                        gstin: document.getElementById('seller-gstin').value,
+                        state: document.getElementById('seller-state').value,
+                    };
+                    const userPath = `artifacts/${appId}/users/${userId}`;
+                    try {
+                        await setDoc(doc(db, `${userPath}/seller/details`), newDetails);
+                        showModal("Seller details saved successfully!");
+                    } catch (error) {
+                        showModal("Error saving details. Check console.");
+                        console.error("Error saving seller details:", error);
+                    }
+                });
+            }
+        }
+        
+        function renderSKUsView() {
+            appContent.innerHTML = `
+                <div class="card space-y-6">
+                    <h2 class="text-2xl font-semibold">Products</h2>
+                    <form id="sku-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="hsn" class="block text-sm font-medium text-gray-700">HSN/SAC Code</label>
+                                <input type="text" id="hsn" class="input-field" placeholder="HSN/SAC Code" required>
+                            </div>
+                            <div>
+                                <label for="productName" class="block text-sm font-medium text-gray-700">Product Name</label>
+                                <input type="text" id="productName" class="input-field" placeholder="Product Name" required>
+                            </div>
+                            <div>
+                                <label for="rate" class="block text-sm font-medium text-gray-700">Rate (per unit)</label>
+                                <input type="number" step="0.01" id="rate" class="input-field" placeholder="Rate" required>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="cgst" class="block text-sm font-medium text-gray-700">CGST %</label>
+                                <input type="number" step="0.01" id="cgst" class="input-field" placeholder="CGST %" required>
+                            </div>
+                            <div>
+                                <label for="sgst" class="block text-sm font-medium text-gray-700">SGST %</label>
+                                <input type="number" step="0.01" id="sgst" class="input-field" placeholder="SGST %" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-full">Add Product</button>
+                    </form>
+
+                    <div id="skus-list" class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 table-striped">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">HSN</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CGST %</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SGST %</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${appState.skus.map(sku => `
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sku.hsn}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${sku.productName}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sku.rate}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sku.cgst}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sku.sgst}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <button data-hsn="${sku.hsn}" class="text-red-600 hover:text-red-900 delete-sku">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            const skuForm = document.getElementById('sku-form');
+            if (skuForm) {
+                skuForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const hsn = document.getElementById('hsn').value.trim();
+                    const newSKU = {
+                        productName: document.getElementById('productName').value.trim(),
+                        rate: parseFloat(document.getElementById('rate').value),
+                        cgst: parseFloat(document.getElementById('cgst').value),
+                        sgst: parseFloat(document.getElementById('sgst').value),
+                    };
+                    if (hsn) {
+                        const userPath = `artifacts/${appId}/users/${userId}`;
+                        try {
+                            await setDoc(doc(db, `${userPath}/skus`, hsn), newSKU);
+                            showModal("Product added successfully!");
+                            skuForm.reset();
+                        } catch (error) {
+                            showModal("Error adding product. Check console.");
+                            console.error("Error adding SKU:", error);
+                        }
+                    } else {
+                        showModal("HSN/SAC Code is required.");
+                    }
+                });
+            }
+            document.querySelectorAll('.delete-sku').forEach(button => {
+                button.addEventListener('click', async (e) => {
+                    const hsnToDelete = e.target.dataset.hsn;
+                    const userPath = `artifacts/${appId}/users/${userId}`;
+                    showModal(`Are you sure you want to delete SKU with HSN code ${hsnToDelete}?`, async () => {
+                        try {
+                            await deleteDoc(doc(db, `${userPath}/skus`, hsnToDelete));
+                            showModal("Product deleted successfully!");
+                        } catch (error) {
+                            showModal("Error deleting product. Check console.");
+                            console.error("Error deleting SKU:", error);
+                        }
+                    });
+                });
+            });
+        }
+        
+        function renderCustomersView() {
+            appContent.innerHTML = `
+                <div class="card space-y-6">
+                    <h2 class="text-2xl font-semibold">Customers</h2>
+                    <form id="customer-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="customerName" class="block text-sm font-medium text-gray-700">Customer Name</label>
+                                <input type="text" id="customerName" class="input-field" placeholder="Customer Name" required>
+                            </div>
+                            <div>
+                                <label for="customerGstin" class="block text-sm font-medium text-gray-700">GSTIN/UIN</label>
+                                <input type="text" id="customerGstin" class="input-field" placeholder="GSTIN/UIN">
+                            </div>
+                        </div>
+                        <div>
+                            <label for="customerAddress" class="block text-sm font-medium text-gray-700">Address</label>
+                            <textarea id="customerAddress" rows="2" class="input-field" placeholder="Customer Address" required></textarea>
+                        </div>
+                        <div>
+                            <label for="customerState" class="block text-sm font-medium text-gray-700">State</label>
+                            <input type="text" id="customerState" class="input-field" placeholder="State" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-full">Add Customer</button>
+                    </form>
+
+                    <div id="customers-list" class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 table-striped">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GSTIN/UIN</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${appState.customers.map(customer => `
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${customer.name}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${customer.gstin || 'N/A'}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${customer.address}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${customer.state}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <button data-id="${customer.id}" class="text-red-600 hover:text-red-900 delete-customer">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            const customerForm = document.getElementById('customer-form');
+            if (customerForm) {
+                customerForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const newCustomer = {
+                        name: document.getElementById('customerName').value.trim(),
+                        gstin: document.getElementById('customerGstin').value.trim(),
+                        address: document.getElementById('customerAddress').value.trim(),
+                        state: document.getElementById('customerState').value.trim(),
+                    };
+                    const userPath = `artifacts/${appId}/users/${userId}`;
+                    try {
+                        await addDoc(collection(db, `${userPath}/customers`), newCustomer);
+                        showModal("Customer added successfully!");
+                        customerForm.reset();
+                    } catch (error) {
+                        showModal("Error adding customer. Check console.");
+                        console.error("Error adding customer:", error);
+                    }
+                });
+            }
+            document.querySelectorAll('.delete-customer').forEach(button => {
+                button.addEventListener('click', async (e) => {
+                    const customerIdToDelete = e.target.dataset.id;
+                    const userPath = `artifacts/${appId}/users/${userId}`;
+                    showModal(`Are you sure you want to delete this customer?`, async () => {
+                        try {
+                            await deleteDoc(doc(db, `${userPath}/customers`, customerIdToDelete));
+                            showModal("Customer deleted successfully!");
+                        } catch (error) {
+                            showModal("Error deleting customer. Check console.");
+                            console.error("Error deleting customer:", error);
+                        }
+                    });
+                });
+            });
+        }
+        
+        function renderBillsView() {
+            const total = appState.billItems.reduce((sum, item) => sum + item.total, 0);
+            const totalCgst = appState.billItems.reduce((sum, item) => sum + item.cgstAmount, 0);
+            const totalSgst = appState.billItems.reduce((sum, item) => sum + item.sgstAmount, 0);
+            const subTotal = total - (totalCgst + totalSgst);
+            const customers = appState.customers;
+            const skus = appState.skus;
+        
+            appContent.innerHTML = `
+                <div class="card space-y-6">
+                    <h2 class="text-2xl font-semibold">Generate Bill</h2>
+        
+                    <!-- Customer and Date Selection -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="customer-select" class="block text-sm font-medium text-gray-700">Select Customer</label>
+                            <select id="customer-select" class="input-field" required>
+                                <option value="" disabled selected>-- Select a customer --</option>
+                                ${customers.map(customer => `
+                                    <option value="${customer.id}" ${appState.selectedCustomer && appState.selectedCustomer.id === customer.id ? 'selected' : ''}>${customer.name}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="bill-date" class="block text-sm font-medium text-gray-700">Date</label>
+                            <input type="date" id="bill-date" class="input-field" value="${appState.selectedDate.toISOString().split('T')[0]}" required>
+                        </div>
+                    </div>
+        
+                    <!-- Add Item Form -->
+                    <form id="add-item-form" class="card p-4 space-y-4">
+                        <h3 class="text-xl font-medium">Add Bill Item</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="sku-select" class="block text-sm font-medium text-gray-700">Product</label>
+                                <select id="sku-select" class="input-field" required>
+                                    <option value="" disabled selected>-- Select a product --</option>
+                                    ${skus.map(sku => `
+                                        <option value="${sku.hsn}">${sku.productName} (${sku.hsn})</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="quantity" class="block text-sm font-medium text-gray-700">Quantity</label>
+                                <input type="number" id="quantity" class="input-field" min="1" required>
+                            </div>
+                            <div>
+                                <label for="rate" class="block text-sm font-medium text-gray-700">Rate</label>
+                                <input type="number" step="0.01" id="rate" class="input-field" readonly>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="cgst" class="block text-sm font-medium text-gray-700">CGST %</label>
+                                <input type="number" step="0.01" id="cgst" class="input-field" readonly>
+                            </div>
+                            <div>
+                                <label for="sgst" class="block text-sm font-medium text-gray-700">SGST %</label>
+                                <input type="number" step="0.01" id="sgst" class="input-field" readonly>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-full">Add Item</button>
+                    </form>
+        
+                    <!-- Bill Items Table -->
+                    <div id="bill-items-list" class="overflow-x-auto">
+                        <h3 class="text-xl font-medium mb-4">Bill Items</h3>
+                        <table class="min-w-full divide-y divide-gray-200 table-striped">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">HSN</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CGST %</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SGST %</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Taxable Value</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${appState.billItems.length > 0 ? appState.billItems.map((item, index) => `
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${item.productName}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.hsn}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.quantity}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.rate.toFixed(2)}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.cgst.toFixed(2)}%</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.sgst.toFixed(2)}%</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.taxableValue.toFixed(2)}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.total.toFixed(2)}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <button data-index="${index}" class="text-red-600 hover:text-red-900 remove-item">Remove</button>
+                                        </td>
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="9" class="text-center py-4 text-sm text-gray-500">No items added yet.</td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+        
+                    <!-- Bill Summary and Actions -->
+                    <div class="flex justify-between items-center bg-gray-50 p-4 rounded-lg">
+                        <div class="space-y-1">
+                            <p class="text-sm font-medium text-gray-700">Sub Total: <span class="text-gray-900 font-semibold">${subTotal.toFixed(2)}</span></p>
+                            <p class="text-sm font-medium text-gray-700">Total CGST: <span class="text-gray-900 font-semibold">${totalCgst.toFixed(2)}</span></p>
+                            <p class="text-sm font-medium text-gray-700">Total SGST: <span class="text-gray-900 font-semibold">${totalSgst.toFixed(2)}</span></p>
+                            <p class="text-lg font-bold text-gray-900">Grand Total: <span class="text-blue-600">${total.toFixed(2)}</span></p>
+                        </div>
+                        <div class="space-x-2">
+                            <button id="clear-bill-btn" class="btn btn-secondary">Clear Bill</button>
+                            <button id="preview-bill-btn" class="btn btn-primary">Generate Bill</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        
+            const customerSelect = document.getElementById('customer-select');
+            const skuSelect = document.getElementById('sku-select');
+            const quantityInput = document.getElementById('quantity');
+            const rateInput = document.getElementById('rate');
+            const cgstInput = document.getElementById('cgst');
+            const sgstInput = document.getElementById('sgst');
+            const addItemForm = document.getElementById('add-item-form');
+            const clearBillBtn = document.getElementById('clear-bill-btn');
+            const previewBillBtn = document.getElementById('preview-bill-btn');
+            const billDateInput = document.getElementById('bill-date');
+        
+            customerSelect.addEventListener('change', (e) => {
+                const customerId = e.target.value;
+                appState.selectedCustomer = appState.customers.find(c => c.id === customerId);
+            });
+        
+            billDateInput.addEventListener('change', (e) => {
+                appState.selectedDate = new Date(e.target.value);
+            });
+        
+            skuSelect.addEventListener('change', (e) => {
+                const selectedSku = appState.skus.find(s => s.hsn === e.target.value);
+                if (selectedSku) {
+                    rateInput.value = selectedSku.rate;
+                    rateInput.removeAttribute('readonly');
+                    cgstInput.value = selectedSku.cgst;
+                    sgstInput.value = selectedSku.sgst;
+                }
+            });
+        
+            if (addItemForm) {
+                addItemForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    if (!appState.selectedCustomer) {
+                        showModal("Please select a customer first.");
+                        return;
+                    }
+        
+                    const hsn = skuSelect.value;
+                    const quantity = parseFloat(quantityInput.value);
+                    const rate = parseFloat(rateInput.value);
+                    const cgst = parseFloat(cgstInput.value);
+                    const sgst = parseFloat(sgstInput.value);
+                    const selectedSku = appState.skus.find(s => s.hsn === hsn);
+        
+                    if (selectedSku && quantity > 0 && rate >= 0) {
+                        const taxableValue = quantity * rate;
+                        const cgstAmount = taxableValue * (cgst / 100);
+                        const sgstAmount = taxableValue * (sgst / 100);
+                        const totalTax = cgstAmount + sgstAmount;
+                        const total = taxableValue + totalTax;
+                        
+                        appState.billItems.push({
+                            ...selectedSku,
+                            hsn: selectedSku.hsn,
+                            quantity,
+                            rate, // Use the user-edited rate
+                            cgst, // Use the user-edited cgst
+                            sgst, // Use the user-edited sgst
+                            taxableValue,
+                            cgstAmount,
+                            sgstAmount,
+                            totalTax,
+                            total
+                        });
+                        addItemForm.reset();
+                        rateInput.value = '';
+                        cgstInput.value = '';
+                        sgstInput.value = '';
+                        renderApp();
+                    } else {
+                        showModal("Please select a product and enter valid details.");
+                    }
+                });
+            }
+        
+            document.querySelectorAll('.remove-item').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const indexToRemove = parseInt(e.target.dataset.index);
+                    appState.billItems.splice(indexToRemove, 1);
+                    renderApp();
+                });
+            });
+        
+            if (clearBillBtn) {
+                clearBillBtn.addEventListener('click', () => {
+                    appState.billItems = [];
+                    appState.selectedCustomer = null;
+                    appState.selectedDate = new Date();
+                    renderApp();
+                });
+            }
+        
+            if (previewBillBtn) {
+                previewBillBtn.addEventListener('click', () => {
+                    if (appState.billItems.length === 0 || !appState.selectedCustomer) {
+                        showModal("Please add items and select a customer before generating a bill.");
+                        return;
+                    }
+                    generateBillPreview();
+                });
+            }
+        }
+        
+        function generateBillPreview() {
+            const customer = appState.selectedCustomer;
+            const seller = appState.sellerDetails;
+            const billDate = appState.selectedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        
+            const total = appState.billItems.reduce((sum, item) => sum + item.total, 0);
+            const totalCgst = appState.billItems.reduce((sum, item) => sum + item.cgstAmount, 0);
+            const totalSgst = appState.billItems.reduce((sum, item) => sum + item.sgstAmount, 0);
+            const subTotal = total - (totalCgst + totalSgst);
+        
+            const totalInWords = numberToWords(total.toFixed(2));
+        
+            appState.billToSave = {
+                customer,
+                seller,
+                billItems: appState.billItems,
+                date: appState.selectedDate.toISOString(),
+                total,
+                totalCgst,
+                totalSgst,
+                subTotal
+            };
+        
+            let preview = `
+                <div class="space-y-4">
+                    <div class="text-center font-bold text-xl mb-4">TAX INVOICE</div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1">
+                            <div class="text-sm">Seller:</div>
+                            <div><span class="font-bold">${seller.name}</span></div>
+                            <div class="text-xs">${seller.address.replace(/\n/g, '<br>')}</div>
+                            <div class="text-xs">GSTIN: ${seller.gstin}</div>
+                            <div class="text-xs">State: ${seller.state}</div>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="text-sm">Bill To:</div>
+                            <div><span class="font-bold">${customer.name}</span></div>
+                            <div class="text-xs">${customer.address.replace(/\n/g, '<br>')}</div>
+                            <div class="text-xs">GSTIN: ${customer.gstin || 'N/A'}</div>
+                            <div class="text-xs">State: ${customer.state}</div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center text-xs mt-4">
+                        <div>Date: ${billDate}</div>
+                        <div>Invoice No: N/A (will be generated on save)</div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="pdf-table">
+                            <thead>
+                                <tr class="bg-gray-100">
+                                    <th class="text-xs">Product Name</th>
+                                    <th class="text-xs">HSN/SAC</th>
+                                    <th class="text-xs">Qty</th>
+                                    <th class="text-xs">Rate</th>
+                                    <th class="text-xs">CGST%</th>
+                                    <th class="text-xs">SGST%</th>
+                                    <th class="text-xs">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${appState.billItems.map(item => `
+                                    <tr class="text-xs">
+                                        <td>${item.productName}</td>
+                                        <td>${item.hsn}</td>
+                                        <td>${item.quantity}</td>
+                                        <td>${item.rate.toFixed(2)}</td>
+                                        <td>${item.cgst.toFixed(2)}%</td>
+                                        <td>${item.sgst.toFixed(2)}%</td>
+                                        <td>${item.total.toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex justify-end text-right text-xs">
+                        <div class="w-1/2 space-y-1">
+                            <div>Sub Total: ${subTotal.toFixed(2)}</div>
+                            <div>Total CGST: ${totalCgst.toFixed(2)}</div>
+                            <div>Total SGST: ${totalSgst.toFixed(2)}</div>
+                            <div class="font-bold text-base">Grand Total: ${total.toFixed(2)}</div>
+                        </div>
+                    </div>
+                    <div class="text-sm font-semibold mt-4">Total in Words: ${totalInWords}</div>
+                    <div class="mt-8 text-xs">
+                        <p>Thank you for your business!</p>
+                        <p class="mt-4">Signature: __________________________</p>
+                    </div>
+                </div>
+            `;
+            
+            billPreviewContent.innerHTML = `<div class="pdf-container">${preview}</div>`;
+            billPreviewModal.classList.remove('hidden');
+        }
+        
+        function numberToWords(num) {
+            const a = ['', 'one ', 'two ', 'three ', 'four ', 'five ', 'six ', 'seven ', 'eight ', 'nine ', 'ten ', 'eleven ', 'twelve ', 'thirteen ', 'fourteen ', 'fifteen ', 'sixteen ', 'seventeen ', 'eighteen ', 'nineteen '];
+            const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+            function convert(n) {
+                let s = '';
+                if (n === 0) return '';
+                if (n < 20) return a[n];
+                if (n < 100) return b[Math.floor(n / 10)] + ' ' + a[n % 10];
+                return a[Math.floor(n / 100)] + 'hundred ' + convert(n % 100);
+            }
+
+            const [integerPart, decimalPart] = String(parseFloat(num).toFixed(2)).split('.');
+            let words = '';
+            const numInt = parseInt(integerPart, 10);
+            const numDec = parseInt(decimalPart, 10);
+
+            const crores = Math.floor(numInt / 10000000);
+            const lakhs = Math.floor((numInt % 10000000) / 100000);
+            const thousands = Math.floor((numInt % 100000) / 1000);
+            const hundreds = numInt % 1000;
+
+            if (crores > 0) words += convert(crores) + 'crore ';
+            if (lakhs > 0) words += convert(lakhs) + 'lakh ';
+            if (thousands > 0) words += convert(thousands) + 'thousand ';
+            if (hundreds > 0) words += convert(hundreds);
+
+            let result = words.trim() + ' Rupees';
+
+            if (numDec > 0) {
+                result += ' and ' + convert(numDec).trim() + ' Paise';
+            }
+
+            return result.trim() + ' only.';
+        }
+        
+        function generateAndDownloadPdf(billData) {
+            try {
+                // Ensure the bill data has the invoice number
+                if (!billData || !billData.invoiceNo) {
+                    console.error("Missing or invalid bill data for PDF generation.");
+                    return;
+                }
+                // Render the bill content into a temporary container
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = getPdfContentHtml(billData);
+                pdfContainer.appendChild(tempDiv);
+                
+                const element = pdfContainer.firstChild;
+
+                // Configure and run html2pdf
+                const opt = {
+                    margin: 10,
+                    filename: `invoice_${billData.invoiceNo}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2 },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+
+                html2pdf().set(opt).from(element).save().then(() => {
+                    // Clean up the temporary container
+                    pdfContainer.innerHTML = '';
+                });
+
+            } catch (error) {
+                console.error("An unexpected error occurred during PDF generation:", error);
+                showModal("An unexpected error occurred during PDF creation. Please check the console for details.");
+            }
+        }
+
+        function getPdfContentHtml(billData) {
+            const { customer, seller, billItems, date, total, totalCgst, totalSgst, subTotal, invoiceNo } = billData;
+            const billDate = new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+            const totalInWords = numberToWords(total.toFixed(2));
+
+            return `
+                <div class="pdf-container">
+                    <div class="text-center font-bold text-lg mb-4">TAX INVOICE</div>
+                    <div class="text-right font-medium mb-4">Invoice No: ${invoiceNo}</div>
+                    <div class="flex justify-between items-center text-sm mb-4">
+                        <div class="w-1/2 pr-2">
+                            <div class="font-normal">Seller:</div>
+                            <div class="font-semibold">${seller.name}</div>
+                            <div class="text-xs">${seller.address.replace(/\n/g, '<br>')}</div>
+                            <div class="text-xs">GSTIN: ${seller.gstin}</div>
+                            <div class="text-xs">State: ${seller.state}</div>
+                        </div>
+                        <div class="w-1/2 pl-2">
+                            <div class="font-normal">Bill To:</div>
+                            <div class="font-semibold">${customer.name}</div>
+                            <div class="text-xs">${customer.address.replace(/\n/g, '<br>')}</div>
+                            <div class="text-xs">GSTIN: ${customer.gstin || 'N/A'}</div>
+                            <div class="text-xs">State: ${customer.state}</div>
+                        </div>
+                    </div>
+                    <div class="text-sm mt-2 mb-4">Date: ${billDate}</div>
+                    
+                    <table class="pdf-table">
+                        <thead>
+                            <tr class="bg-gray-100">
+                                <th class="text-xs">#</th>
+                                <th class="text-xs">Product Name</th>
+                                <th class="text-xs">HSN/SAC</th>
+                                <th class="text-xs">Qty</th>
+                                <th class="text-xs">Rate</th>
+                                <th class="text-xs">CGST%</th>
+                                <th class="text-xs">SGST%</th>
+                                <th class="text-xs">Taxable Value</th>
+                                <th class="text-xs">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${billItems.map((item, index) => `
+                                <tr class="text-xs">
+                                    <td>${index + 1}</td>
+                                    <td>${item.productName}</td>
+                                    <td>${item.hsn}</td>
+                                    <td>${item.quantity}</td>
+                                    <td>${item.rate.toFixed(2)}</td>
+                                    <td>${item.cgst.toFixed(2)}%</td>
+                                    <td>${item.sgst.toFixed(2)}%</td>
+                                    <td>${item.taxableValue.toFixed(2)}</td>
+                                    <td>${item.total.toFixed(2)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+
+                    <div class="mt-4 flex justify-end text-right">
+                        <div class="w-1/2 space-y-1 text-sm">
+                            <div class="flex justify-between"><span>Sub Total:</span><span>${subTotal.toFixed(2)}</span></div>
+                            <div class="flex justify-between"><span>Total CGST:</span><span>${totalCgst.toFixed(2)}</span></div>
+                            <div class="flex justify-between"><span>Total SGST:</span><span>${totalSgst.toFixed(2)}</span></div>
+                            <div class="flex justify-between font-bold text-base"><span>Grand Total:</span><span>${total.toFixed(2)}</span></div>
+                        </div>
+                    </div>
+
+                    <div class="text-sm font-semibold mt-4">Total in Words: ${totalInWords}</div>
+                    <div class="mt-8 text-xs">
+                        <p>Thank you for your business!</p>
+                        <p class="mt-4">Signature: __________________________</p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderPastBillsView() {
+            appContent.innerHTML = `
+                <div class="card space-y-6">
+                    <div class="flex flex-col sm:flex-row justify-between items-center mb-4">
+                        <h2 class="text-2xl font-semibold mb-2 sm:mb-0">Past Bills</h2>
+                        <button id="generate-new-bill-btn" class="btn btn-primary">Generate New Bill</button>
+                    </div>
+                    <div id="past-bills-list" class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 table-striped">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Invoice No</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${appState.bills.length > 0 ? appState.bills.map(bill => `
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${bill.invoiceNo || 'N/A'}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${new Date(bill.date).toLocaleDateString()}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${bill.customer.name}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${bill.total.toFixed(2)}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <button data-id="${bill.id}" class="text-blue-600 hover:text-blue-900 view-bill">View/Download</button>
+                                        </td>
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="5" class="text-center py-4 text-sm text-gray-500">No past bills found.</td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('generate-new-bill-btn').addEventListener('click', () => {
+                appState.currentView = 'bills';
+                appState.billItems = [];
+                appState.selectedCustomer = null;
+                appState.selectedDate = new Date();
+                renderApp();
+            });
+        
+            document.querySelectorAll('.view-bill').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const billId = e.target.dataset.id;
+                    const billToView = appState.bills.find(bill => bill.id === billId);
+                    if (billToView) {
+                        generateBillPreviewFromData(billToView);
+                    } else {
+                        showModal("Bill not found.");
+                    }
+                });
+            });
+        }
+        
+        function generateBillPreviewFromData(billData) {
+            billPreviewContent.innerHTML = getPdfContentHtml(billData);
+            billPreviewModal.classList.remove('hidden');
+            
+            downloadBillBtn.onclick = () => {
+                generateAndDownloadPdf(billData);
+            };
+        }
+        
+        // --- Onload and DOMContentLoaded ---
+        document.addEventListener('DOMContentLoaded', () => {
+            domReady = true;
+            initializeAppAndRender();
+        });
+        
+    </script>
+</body>
+</html>
